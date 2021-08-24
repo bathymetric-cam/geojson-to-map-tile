@@ -2,7 +2,7 @@ import { createConverter } from "convert-svg-to-png"
 import * as D3Node from "d3-node"
 import { d3 } from "d3-node"
 import * as fs from "fs"
-import { FeatureCollection, GeoJSON } from "geojson"
+import { Feature, FeatureCollection, GeoJSON } from "geojson"
 import * as sharp from "sharp"
 
 // Set up global variables which can be changed
@@ -43,6 +43,22 @@ class Tile {
   }
 }
 const convertSvgFiles = async (tile: Tile) => {
+  // Add map tile's four corners to GeoJSON features
+  const west = tile.x / Math.pow(2.0, tile.zoom) * 360.0 - 180.0
+  const east = (tile.x + 1) / Math.pow(2.0, tile.zoom) * 360.0 - 180.0
+  const n = Math.PI - 2.0 * Math.PI * tile.y / Math.pow(2.0, tile.zoom)
+  const north = 180.0 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)))
+  const m = Math.PI - 2.0 * Math.PI * (tile.y + 1) / Math.pow(2.0, tile.zoom)
+  const south = 180.0 / Math.PI * Math.atan(0.5 * (Math.exp(m) - Math.exp(-m)))
+  const feature = {
+    type: "Feature",
+    geometry: {
+      type: "MultiPoint",
+      coordinates: [[west,north],[west,south],[east,south],[east,north],[west,north]]
+    }
+  } as Feature
+  const features = tile.geoJSON.features.concat([feature])
+
   // Entry point into main convert GeoJSON to PNG function
   const converter = createConverter()
 
@@ -50,21 +66,22 @@ const convertSvgFiles = async (tile: Tile) => {
   const projection = d3.geoMercator()
     .fitSize([width, height], {
       "type": "FeatureCollection",
-      "features": tile.geoJSON.features
+      "features": features//tile.geoJSON.features
     })
-  const p = d3.geoPath(projection)
-  
+  const geoPath = d3.geoPath(projection)
+ 
   // Go through each feature, or constituency, within the region, 
   // and render it as SVG with the feature highlighted
-  const renderedSVG = await renderSVG(tile.geoJSON.features, p)
+  // const svgString = await renderSVG(tile, geoPath)
+  const svgString = await renderSVG(features, geoPath)
   try {
     // Using the `sharp` library, take the rendered SVG string and generate a PNG
-    await sharp(Buffer.from(renderedSVG.svgString))
+    await sharp(Buffer.from(svgString))
       .extract({
         left: 0, 
-        top: renderedSVG.y1, 
+        top: 0, 
         width: width, 
-        height: renderedSVG.y2 - renderedSVG.y1
+        height: height
       })
       .png()
       .toFile(`${outputDirectory}/${tile.zoom}.${tile.x}.${tile.y}.png`)
@@ -74,14 +91,16 @@ const convertSvgFiles = async (tile: Tile) => {
   await converter.destroy()
 }
 
-const renderSVG = async (features, p) => {
+const renderSVG = async (features, geoPath) => {
   // Use D3 on the back-end to create an SVG of the FeatureCollection
-
   const svgString = features
     .map(feature => {
       const d3N = new D3Node()
-      const average = (feature.properties.maxDepth + feature.properties.minDepth) / 2.0
-      const color = colors.find(color => average >= color.minDepth && average <= color.maxDepth).code
+      let color = "rgba(0,0,0,0)"
+      if (feature.properties && feature.properties.maxDepth && feature.properties.minDepth) {
+        const averageDepth = (feature.properties.maxDepth + feature.properties.minDepth) / 2.0
+        color = colors.find(color => averageDepth >= color.minDepth && averageDepth <= color.maxDepth).code
+      }
       const svg = d3N.createSVG(width, height)
       svg
         .selectAll("path")
@@ -92,18 +111,14 @@ const renderSVG = async (features, p) => {
         .style("shape-rendering", "crispEdges")
         .style("stroke", color)
         .style("stroke-width", "1px")
-        .attr("d", p)
+        .attr("d", geoPath)
       return d3N.svgString()
        .replace('<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256">', "")
        .replace("</svg>", "")
     })
     .reduce((a, b) => { return a + b })
 
-  return {
-    svgString: `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256">${svgString}</svg>`, 
-    y1: 0,
-    y2: 256
-  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256">${svgString}</svg>`
 }
 
 const createTiles = async () => {
