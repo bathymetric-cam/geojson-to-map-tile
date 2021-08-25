@@ -390,3 +390,5 @@ node_modules
 
 geojsons/*
 images/*
+
+convert-config.json
