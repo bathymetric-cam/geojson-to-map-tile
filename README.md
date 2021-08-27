@@ -1,6 +1,6 @@
 # geojson-to-maptile
 
-geojson-to-maptile is a tool converting depth contour into GeoJSON into map tile png image.
+geojson-to-maptile is a tool converting depth contour GeoJSON into map tile png image.
 
 Source GeoJSON file
 
